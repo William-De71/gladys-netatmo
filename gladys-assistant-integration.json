@@ -210,38 +210,38 @@
         "fr": "Délai entre deux cycles de rafraîchissement des valeurs."
       },
       "required": false,
-      "default": 120,
+      "default": "120",
       "options": [
         {
-          "value": 30,
+          "value": "30",
           "label": {
             "en": "30 seconds",
             "fr": "30 secondes"
           }
         },
         {
-          "value": 60,
+          "value": "60",
           "label": {
             "en": "1 minute",
             "fr": "1 minute"
           }
         },
         {
-          "value": 120,
+          "value": "120",
           "label": {
             "en": "2 minutes (recommended)",
             "fr": "2 minutes (recommandé)"
           }
         },
         {
-          "value": 300,
+          "value": "300",
           "label": {
             "en": "5 minutes",
             "fr": "5 minutes"
           }
         },
         {
-          "value": 600,
+          "value": "600",
           "label": {
             "en": "10 minutes",
             "fr": "10 minutes"
