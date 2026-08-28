@@ -26,6 +26,12 @@ import {
   buildFeatureWifiStrength,
   buildFeatureTemperature,
   buildFeatureThermSetpointTemperature,
+  buildFeatureThermostatMode,
+  buildFeatureOperatingState,
+  buildFeatureFrostGuard,
+  buildFeatureAway,
+  buildFeatureAnticipating,
+  buildFeatureBatteryVoltage,
   buildFeatureBoilerStatus,
   buildFeatureHeatingPowerRequest,
   buildFeaturePlugConnectedBoiler,
@@ -164,6 +170,15 @@ export function convertDevice(gladys, netatmoDevice, cameraEnrichments) {
         buildFeatureThermSetpointTemperature(nameDevice, externalId, {
           writable: setpointWritable,
         }),
+        // Mode + frost guard + away are all driven by the room setpoint mode,
+        // so they are writable exactly when the setpoint is.
+        buildFeatureThermostatMode(nameDevice, externalId, { writable: setpointWritable }),
+        buildFeatureOperatingState(nameDevice, externalId),
+        buildFeatureFrostGuard(nameDevice, externalId, { writable: setpointWritable }),
+        buildFeatureAway(nameDevice, externalId, { writable: setpointWritable }),
+        buildFeatureHeatingPowerRequest(nameDevice, externalId),
+        buildFeatureAnticipating(nameDevice, externalId),
+        buildFeatureBatteryVoltage(nameDevice, externalId),
         buildFeatureOpenWindow(nameDevice, externalId),
         buildFeatureBoilerStatus(nameDevice, externalId),
       );
@@ -181,6 +196,12 @@ export function convertDevice(gladys, netatmoDevice, cameraEnrichments) {
         buildFeatureThermSetpointTemperature(nameDevice, externalId, {
           writable: setpointWritable,
         }),
+        buildFeatureThermostatMode(nameDevice, externalId, { writable: setpointWritable }),
+        buildFeatureOperatingState(nameDevice, externalId),
+        buildFeatureFrostGuard(nameDevice, externalId, { writable: setpointWritable }),
+        buildFeatureAway(nameDevice, externalId, { writable: setpointWritable }),
+        buildFeatureAnticipating(nameDevice, externalId),
+        buildFeatureBatteryVoltage(nameDevice, externalId),
         buildFeatureOpenWindow(nameDevice, externalId),
         buildFeatureHeatingPowerRequest(nameDevice, externalId),
       );

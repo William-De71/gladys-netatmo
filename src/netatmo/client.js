@@ -12,7 +12,7 @@
 
 import { createLogger } from '@gladysassistant/integration-sdk';
 
-import { NETATMO_BASE_URL, API_PATHS } from './constants.js';
+import { NETATMO_BASE_URL, API_PATHS, NETATMO_SETPOINT_MODE } from './constants.js';
 
 const logger = createLogger({ name: 'netatmo-client' });
 
@@ -124,14 +124,23 @@ export function createNetatmoClient({ oauth, fetchImpl = fetch, baseUrl = NETATM
   }
 
   /**
-   * Set a room thermostat setpoint (mode `manual`, like the core).
-   * @param {{homeId: string, roomId: string, temp: number}} setpoint target
+   * Set a room thermostat setpoint and/or mode.
+   *
+   * `mode` defaults to `manual` (the core behaviour). A mode change carries no
+   * temperature: `temp` is only sent when provided, since Netatmo rejects a
+   * `temp` on modes like `hg`, `away` or `schedule`.
+   * @param {{homeId: string, roomId: string, temp?: number, mode?: string}} setpoint target
    * @returns {Promise<object>} parsed response body
    */
-  async function setRoomThermpoint({ homeId, roomId, temp }) {
+  async function setRoomThermpoint({ homeId, roomId, temp, mode = NETATMO_SETPOINT_MODE.MANUAL }) {
     return request(API_PATHS.SET_ROOM_THERMPOINT, {
       method: 'POST',
-      form: { home_id: homeId, room_id: roomId, mode: 'manual', temp },
+      form: {
+        home_id: homeId,
+        room_id: roomId,
+        mode,
+        ...(temp === undefined || temp === null ? {} : { temp }),
+      },
     });
   }
 

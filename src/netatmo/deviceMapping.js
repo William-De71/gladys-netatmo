@@ -7,6 +7,8 @@
 
 import { DEVICE_FEATURE_CATEGORIES, DEVICE_FEATURE_TYPES } from '@gladysassistant/integration-sdk';
 
+import { SETPOINT_MODE_TO_THERMOSTAT_MODE, THERMOSTAT_MODE_TO_SETPOINT_MODE } from './constants.js';
+
 const toBinary = (valueFromDevice) => (valueFromDevice === true || valueFromDevice === 1 ? 1 : 0);
 const toInteger = (valueFromDevice) => parseInt(valueFromDevice, 10);
 const identity = (valueFromDevice) => valueFromDevice;
@@ -24,6 +26,8 @@ const BATTERY_LEVELS = {
 export const writeValues = {
   [DEVICE_FEATURE_CATEGORIES.THERMOSTAT]: {
     [DEVICE_FEATURE_TYPES.THERMOSTAT.TARGET_TEMPERATURE]: identity,
+    [DEVICE_FEATURE_TYPES.THERMOSTAT.MODE]: (valueFromGladys) =>
+      THERMOSTAT_MODE_TO_SETPOINT_MODE[toInteger(valueFromGladys)],
   },
   [DEVICE_FEATURE_CATEGORIES.SWITCH]: {
     /* camera monitoring: 'on' / 'off' */
@@ -35,6 +39,13 @@ export const writeValues = {
 export const readValues = {
   [DEVICE_FEATURE_CATEGORIES.THERMOSTAT]: {
     [DEVICE_FEATURE_TYPES.THERMOSTAT.TARGET_TEMPERATURE]: identity,
+    // A Netatmo mode with no Gladys counterpart (`hg`, `away`) maps to
+    // undefined, which the telemetry treats as "no value": the mode feature
+    // then keeps its previous state while the dedicated frost-guard/away
+    // features carry the truth.
+    [DEVICE_FEATURE_TYPES.THERMOSTAT.MODE]: (valueFromDevice) =>
+      SETPOINT_MODE_TO_THERMOSTAT_MODE[valueFromDevice],
+    [DEVICE_FEATURE_TYPES.THERMOSTAT.OPERATING_STATE]: identity,
   },
   [DEVICE_FEATURE_CATEGORIES.SWITCH]: {
     [DEVICE_FEATURE_TYPES.SWITCH.BINARY]: toBinary,
@@ -49,6 +60,9 @@ export const readValues = {
     [DEVICE_FEATURE_TYPES.SENSOR.DECIMAL]: identity,
     [DEVICE_FEATURE_TYPES.TEMPERATURE_SENSOR.MIN]: identity,
     [DEVICE_FEATURE_TYPES.TEMPERATURE_SENSOR.MAX]: identity,
+  },
+  [DEVICE_FEATURE_CATEGORIES.ENERGY_SENSOR]: {
+    [DEVICE_FEATURE_TYPES.ENERGY_SENSOR.VOLTAGE]: toInteger,
   },
   [DEVICE_FEATURE_CATEGORIES.SIGNAL]: {
     [DEVICE_FEATURE_TYPES.SIGNAL.QUALITY]: toInteger,

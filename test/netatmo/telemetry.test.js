@@ -479,3 +479,89 @@ test('setDeviceValue surfaces the missing-scope error (Netatmo 403 code 13)', as
     /reconnect your Netatmo/,
   );
 });
+
+// --- Thermostat mode, frost guard and away (issue: missing mode) ------------
+
+test('publishes the thermostat mode, operating state and battery voltage', async () => {
+  gladys.devices = await telemetry.syncDiscovery(config);
+  await telemetry.refreshValues(config);
+  const therm = (suffix) => stateOf(`ext:netatmo:therm-1:${suffix}`);
+
+  // room-1 runs `manual` -> Gladys HEATING (1).
+  assert.deepEqual(therm('therm_setpoint_mode'), [1]);
+  // heating_power_request is 0 on room-1: the room is not calling for heat.
+  assert.deepEqual(therm('operating_state'), [0]);
+  assert.deepEqual(therm('heating_power_request'), [0]);
+  assert.deepEqual(therm('anticipating'), [0]);
+  assert.deepEqual(therm('battery_level'), [3767]);
+  // Not in frost guard nor away.
+  assert.deepEqual(therm('frost_guard'), [0]);
+  assert.deepEqual(therm('away'), [0]);
+});
+
+test('a frost-guard room raises its own switch and leaves the mode feature unset', async () => {
+  gladys.devices = await telemetry.syncDiscovery(config);
+  await telemetry.refreshValues(config);
+  const valve = (suffix) => stateOf(`ext:netatmo:valve-1:${suffix}`);
+
+  // room-2 is in `hg`: the switch carries the truth...
+  assert.deepEqual(valve('frost_guard'), [1]);
+  assert.deepEqual(valve('away'), [0]);
+  // ...and the mode feature stays SILENT rather than claiming OFF, which would
+  // tell the user the home is unprotected while frost guard is heating it.
+  assert.deepEqual(valve('therm_setpoint_mode'), []);
+  // The room does call for heat (42%).
+  assert.deepEqual(valve('operating_state'), [1]);
+  assert.deepEqual(valve('heating_power_request'), [1]);
+  assert.deepEqual(valve('anticipating'), [1]);
+});
+
+test('setDeviceValue posts a mode change without a temperature', async () => {
+  gladys.devices = await telemetry.syncDiscovery(config);
+  const device = gladys.devices.find((d) => d.external_id === 'ext:netatmo:therm-1');
+  const mode = device.features.find((f) => f.external_id.endsWith(':therm_setpoint_mode'));
+
+  await setDeviceValue({ client }, { device, feature: mode, value: 3 }); // AUTO
+  await setDeviceValue({ client }, { device, feature: mode, value: 0 }); // OFF
+  assert.deepEqual(netatmo.state.setpointRequests, [
+    { home_id: 'home-1', room_id: 'room-1', mode: 'schedule' },
+    { home_id: 'home-1', room_id: 'room-1', mode: 'off' },
+  ]);
+});
+
+test('the frost-guard and away switches map onto the room setpoint mode', async () => {
+  gladys.devices = await telemetry.syncDiscovery(config);
+  const device = gladys.devices.find((d) => d.external_id === 'ext:netatmo:therm-1');
+  const frostGuard = device.features.find((f) => f.external_id.endsWith(':frost_guard'));
+  const away = device.features.find((f) => f.external_id.endsWith(':away'));
+
+  await setDeviceValue({ client }, { device, feature: frostGuard, value: 1 });
+  await setDeviceValue({ client }, { device, feature: away, value: 1 });
+  // Switching one OFF hands the room back to its schedule: Netatmo has no
+  // "leave frost guard" command.
+  await setDeviceValue({ client }, { device, feature: frostGuard, value: 0 });
+  assert.deepEqual(netatmo.state.setpointRequests, [
+    { home_id: 'home-1', room_id: 'room-1', mode: 'hg' },
+    { home_id: 'home-1', room_id: 'room-1', mode: 'away' },
+    { home_id: 'home-1', room_id: 'room-1', mode: 'schedule' },
+  ]);
+});
+
+// --- Refresh cadence --------------------------------------------------------
+
+test('the refresh loop honours the configured interval', async () => {
+  const timers = [];
+  const originalSetInterval = globalThis.setInterval;
+  globalThis.setInterval = (fn, ms) => {
+    timers.push(ms);
+    return originalSetInterval(() => {}, 1e9);
+  };
+  try {
+    const engine = createTelemetry({ gladys, client });
+    engine.start(normalizeConfig({ refresh_interval: 60 }));
+    engine.stop();
+    assert.deepEqual(timers, [60 * 1000]);
+  } finally {
+    globalThis.setInterval = originalSetInterval;
+  }
+});

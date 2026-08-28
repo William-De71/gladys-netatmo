@@ -39,9 +39,23 @@ test('converts a NATherm1 with the core feature set and params', () => {
     'temperature',
     'therm_measured_temperature',
     'therm_setpoint_temperature',
+    'therm_setpoint_mode',
+    'operating_state',
+    'frost_guard',
+    'away',
+    'heating_power_request',
+    'anticipating',
+    'battery_level',
     'open_window',
     'boiler_status',
   ]);
+  // The mode feature only offers what a Netatmo thermostat can do: no COOLING.
+  const mode = device.features.find((f) => f.external_id.endsWith(':therm_setpoint_mode'));
+  assert.equal(mode.read_only, false);
+  assert.deepEqual(
+    mode.supported_options.map((option) => option.value),
+    [0, 1, 3],
+  );
   const setpoint = device.features.find((f) =>
     f.external_id.endsWith(':therm_setpoint_temperature'),
   );
@@ -64,10 +78,27 @@ test('converts a NRV without room: no measured temperature feature, no room para
     'battery_percent',
     'rf_strength',
     'therm_setpoint_temperature',
+    'therm_setpoint_mode',
+    'operating_state',
+    'frost_guard',
+    'away',
+    'anticipating',
+    'battery_level',
     'open_window',
     'heating_power_request',
   ]);
   assert.equal(paramValue(device, 'room_id'), undefined);
+  // No room means no setroomthermpoint target: every writable feature of the
+  // thermostat must degrade to read-only rather than publish a doomed command.
+  for (const suffix of [
+    'therm_setpoint_temperature',
+    'therm_setpoint_mode',
+    'frost_guard',
+    'away',
+  ]) {
+    const readOnlyFeature = device.features.find((f) => f.external_id.endsWith(`:${suffix}`));
+    assert.equal(readOnlyFeature.read_only, true, `${suffix} must be read-only without a room`);
+  }
 });
 
 test('converts a NAPlug with wifi+rf and the bridged modules param', () => {

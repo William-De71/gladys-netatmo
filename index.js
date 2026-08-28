@@ -208,6 +208,10 @@ export function setupIntegration(
   gladys.onSetValue(async (device, feature, value) => {
     logger.info(`onSetValue <- ${feature.external_id} = ${value}`);
     await setDeviceValue({ gladys, client }, { device, feature, value });
+    // Netatmo needs a moment before homestatus reports the new setpoint/mode:
+    // re-read shortly after so the UI does not snap back to the old value
+    // until the next cycle.
+    telemetry.scheduleRefreshAfterCommand(config);
   });
 
   // --- Camera: Gladys asks for a fresh snapshot ------------------------------
@@ -249,6 +253,12 @@ export function setupIntegration(
       telemetry.resetDedup();
     }
     await syncConnection();
+    // A new cadence only takes effect on a restarted loop (setInterval keeps
+    // its original period otherwise).
+    if (previous.refresh_interval !== config.refresh_interval && oauth.hasTokens()) {
+      logger.info(`Refresh interval changed to ${config.refresh_interval}s -> restarting the loop`);
+      telemetry.start(config);
+    }
     // Saving the configuration re-runs the discovery automatically: enabling
     // a toggle (e.g. security_api) must surface its devices without a manual
     // re-scan on the Discovery screen.

@@ -28,6 +28,7 @@ import { createLogger, DEVICE_TRANSPORTS } from '@gladysassistant/integration-sd
 import {
   REFRESH_VALUES_INTERVAL_MS,
   STATE_KEEP_ALIVE_MS,
+  POST_COMMAND_REFRESH_DELAY_MS,
   MAX_ENTRIES_PER_REQUEST,
   SECURITY_MODULE_TYPES,
   CAMERA_LIVE_QUALITIES,
@@ -89,6 +90,7 @@ export function createTelemetry({
   const published = new Map();
   let refreshTimer = null;
   let refreshInFlight = null;
+  let postCommandTimer = null;
 
   const cameras = createCameraImages({ fetchImpl, now });
   // Last raw Netatmo payload per camera id (vpn_url, is_local...), refreshed
@@ -472,25 +474,72 @@ export function createTelemetry({
     });
   }
 
-  /** Start the periodic refresh loop (immediate first cycle). */
+  /**
+   * Start the periodic refresh loop (immediate first cycle).
+   *
+   * The cadence comes from the user configuration (`refresh_interval`, in
+   * seconds, already bounded by normalizeConfig); the constructor override
+   * still wins so tests can drive their own clock.
+   */
   function start(config) {
     stop();
+    const configuredMs = Number(config?.refresh_interval) * 1000;
+    const intervalMs =
+      refreshIntervalMs !== REFRESH_VALUES_INTERVAL_MS
+        ? refreshIntervalMs
+        : Number.isFinite(configuredMs) && configuredMs > 0
+          ? configuredMs
+          : refreshIntervalMs;
     const run = () =>
       refreshValues(config).catch((err) =>
         logger.error(`Netatmo value refresh failed: ${err.message}`),
       );
     run();
-    refreshTimer = setInterval(run, refreshIntervalMs);
+    logger.info(`Netatmo value refresh loop started (every ${Math.round(intervalMs / 1000)}s)`);
+    refreshTimer = setInterval(run, intervalMs);
     refreshTimer.unref?.();
   }
 
-  /** Stop the periodic refresh loop. */
+  /**
+   * Re-read the account shortly after a user command, so the UI reflects what
+   * Netatmo actually applied instead of waiting for the next full cycle. The
+   * short-TTL load cache is dropped first: the point is to see the NEW state.
+   * Fire-and-forget — a failure here must never surface as a command error.
+   * @param {object} config normalized integration config
+   */
+  function scheduleRefreshAfterCommand(config) {
+    if (postCommandTimer) {
+      clearTimeout(postCommandTimer);
+    }
+    postCommandTimer = setTimeout(() => {
+      postCommandTimer = null;
+      loadCache = null;
+      refreshValues(config).catch((err) =>
+        logger.warn(`Post-command refresh failed: ${err.message}`),
+      );
+    }, POST_COMMAND_REFRESH_DELAY_MS);
+    postCommandTimer.unref?.();
+  }
+
+  /** Stop the periodic refresh loop and any pending post-command refresh. */
   function stop() {
     if (refreshTimer) {
       clearInterval(refreshTimer);
       refreshTimer = null;
     }
+    if (postCommandTimer) {
+      clearTimeout(postCommandTimer);
+      postCommandTimer = null;
+    }
   }
 
-  return { syncDiscovery, refreshValues, getCameraSnapshot, resetDedup, start, stop };
+  return {
+    syncDiscovery,
+    refreshValues,
+    scheduleRefreshAfterCommand,
+    getCameraSnapshot,
+    resetDedup,
+    start,
+    stop,
+  };
 }

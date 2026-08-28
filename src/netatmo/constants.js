@@ -20,6 +20,7 @@ export const API_PATHS = {
   GET_THERMOSTATS: '/api/getthermostatsdata',
   GET_WEATHER_STATIONS: '/api/getstationsdata?get_favorites=false',
   SET_ROOM_THERMPOINT: '/api/setroomthermpoint',
+  SET_THERM_MODE: '/api/setthermmode',
   SET_STATE: '/api/setstate',
   ADD_WEBHOOK: '/api/addwebhook',
   DROP_WEBHOOK: '/api/dropwebhook',
@@ -146,8 +147,74 @@ export const DEFAULT_CAMERA_LIVE_QUALITY = 'high';
 export const ROOM_DERIVED_SUFFIXES = [
   'therm_measured_temperature',
   'therm_setpoint_temperature',
+  'therm_setpoint_mode',
+  'operating_state',
+  'frost_guard',
+  'away',
   'open_window',
   'heating_power_request',
+  'anticipating',
+];
+
+// Gladys value enums for the thermostat features. The SDK exports the feature
+// CATEGORIES/TYPES/UNITS tables but not the value enums referenced in its
+// comments, so they are mirrored here from the core
+// (server/utils/constants.js) — see docs/PROPOSAL-thermostat-modes.md, which
+// asks for them to be exported by the SDK.
+export const THERMOSTAT_MODE = {
+  OFF: 0,
+  HEATING: 1,
+  COOLING: 2,
+  AUTO: 3,
+};
+
+export const THERMOSTAT_OPERATING_STATE = {
+  IDLE: 0,
+  HEATING: 1,
+  COOLING: 2,
+};
+
+// Netatmo setpoint modes (`therm_setpoint_mode` on a room).
+export const NETATMO_SETPOINT_MODE = {
+  SCHEDULE: 'schedule',
+  MANUAL: 'manual',
+  MAX: 'max',
+  OFF: 'off',
+  FROST_GUARD: 'hg',
+  AWAY: 'away',
+  HOME: 'home',
+};
+
+// Netatmo setpoint mode -> Gladys THERMOSTAT_MODE.
+//
+// Only three Gladys values are reachable: the core enum is a HVAC vocabulary
+// (off/heating/cooling/auto) with no frost-guard nor away member, and the front
+// hardcodes those four options — `supported_options` can only FILTER that list.
+// `hg` and `away` are therefore NOT mapped here (mapping them onto OFF would
+// claim the home is unprotected while frost guard is actively heating it):
+// they get their own writable binary features instead, and the mode feature
+// keeps reporting the underlying heating/auto state.
+export const SETPOINT_MODE_TO_THERMOSTAT_MODE = {
+  [NETATMO_SETPOINT_MODE.SCHEDULE]: THERMOSTAT_MODE.AUTO,
+  [NETATMO_SETPOINT_MODE.HOME]: THERMOSTAT_MODE.AUTO,
+  [NETATMO_SETPOINT_MODE.MANUAL]: THERMOSTAT_MODE.HEATING,
+  [NETATMO_SETPOINT_MODE.MAX]: THERMOSTAT_MODE.HEATING,
+  [NETATMO_SETPOINT_MODE.OFF]: THERMOSTAT_MODE.OFF,
+};
+
+// Gladys THERMOSTAT_MODE -> Netatmo setpoint mode (the command direction).
+export const THERMOSTAT_MODE_TO_SETPOINT_MODE = {
+  [THERMOSTAT_MODE.AUTO]: NETATMO_SETPOINT_MODE.SCHEDULE,
+  [THERMOSTAT_MODE.HEATING]: NETATMO_SETPOINT_MODE.MANUAL,
+  [THERMOSTAT_MODE.OFF]: NETATMO_SETPOINT_MODE.OFF,
+};
+
+// The subset of modes published as `supported_options`, so the front only
+// offers what a Netatmo thermostat can actually do (no COOLING button).
+export const THERMOSTAT_MODE_OPTIONS = [
+  { value: THERMOSTAT_MODE.OFF, label: 'Off', sort_order: 0 },
+  { value: THERMOSTAT_MODE.HEATING, label: 'Manual', sort_order: 1 },
+  { value: THERMOSTAT_MODE.AUTO, label: 'Schedule', sort_order: 2 },
 ];
 
 // Telemetry refresh cadence: one batched load of every home/station per cycle
@@ -156,10 +223,29 @@ export const ROOM_DERIVED_SUFFIXES = [
 // one call per device, which matters against the Netatmo rate limits.
 export const REFRESH_VALUES_INTERVAL_MS = 120 * 1000;
 
-// A state whose value did not change is re-published at most every 30 minutes
-// (keep-alive), so Gladys still sees the device alive without flooding the
-// state history at every 120s cycle.
-export const STATE_KEEP_ALIVE_MS = 30 * 60 * 1000;
+// User-selectable cadences (seconds), exposed by the manifest `refresh_interval`
+// select. Netatmo rate-limits an app to 500 requests / 10 min per user; one
+// cycle costs 3-4 calls, so even the fastest option stays far below the cap
+// (60s -> ~24 calls / 10 min).
+export const REFRESH_INTERVAL_CHOICES = [30, 60, 120, 300, 600];
+
+// Bounds applied to any refresh interval, whatever its origin: a value below
+// the floor would hammer the Netatmo quota, one above the ceiling would make
+// the integration look dead.
+export const MIN_REFRESH_INTERVAL_MS = 30 * 1000;
+export const MAX_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
+
+// A state whose value did not change is re-published at most every 5 minutes
+// (keep-alive), so Gladys keeps seeing the device alive. Deliberately shorter
+// than the 30 minutes the core uses: on a thermostat, the values that matter
+// (setpoint, mode) can legitimately sit unchanged for hours, and a half-hour
+// silence reads as "nothing comes up in Gladys".
+export const STATE_KEEP_ALIVE_MS = 5 * 60 * 1000;
+
+// After a user command (setpoint, mode, frost guard...), Netatmo needs a moment
+// before homestatus reflects it: re-read shortly after instead of waiting for
+// the next full cycle, so the UI does not snap back to the previous value.
+export const POST_COMMAND_REFRESH_DELAY_MS = 3 * 1000;
 
 // How many homes are detailed concurrently (mirrors the core Promise.map).
 export const HOMES_CONCURRENCY = 2;

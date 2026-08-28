@@ -8,7 +8,44 @@
 // (core PR #2617: legitimate zeros are values, absences are not).
 // -----------------------------------------------------------------------------
 
-import { SUPPORTED_MODULE_TYPE } from './constants.js';
+import {
+  SUPPORTED_MODULE_TYPE,
+  NETATMO_SETPOINT_MODE,
+  THERMOSTAT_OPERATING_STATE,
+} from './constants.js';
+
+/** Room setpoint mode, the source of the mode/frost-guard/away features. */
+const setpointMode = (deviceNetatmo) => deviceNetatmo.room?.therm_setpoint_mode;
+
+/** True when the room runs the given Netatmo mode (undefined if unknown). */
+function isMode(deviceNetatmo, mode) {
+  const current = setpointMode(deviceNetatmo);
+  return current === undefined || current === null ? undefined : current === mode;
+}
+
+/**
+ * Room heat demand as a Gladys operating state. `heating_power_request` is a
+ * 0-100 percentage: anything above zero means the room is calling for heat.
+ */
+function operatingState(deviceNetatmo) {
+  const request = deviceNetatmo.room?.heating_power_request;
+  if (request !== undefined && request !== null) {
+    return request > 0 ? THERMOSTAT_OPERATING_STATE.HEATING : THERMOSTAT_OPERATING_STATE.IDLE;
+  }
+  // No room-level demand (legacy payloads): fall back on the boiler relay.
+  if (deviceNetatmo.boiler_status !== undefined && deviceNetatmo.boiler_status !== null) {
+    return deviceNetatmo.boiler_status
+      ? THERMOSTAT_OPERATING_STATE.HEATING
+      : THERMOSTAT_OPERATING_STATE.IDLE;
+  }
+  return undefined;
+}
+
+/** Room heat demand as a binary (0-100 percentage -> on/off). */
+function heatingPowerRequest(deviceNetatmo) {
+  const request = deviceNetatmo.room?.heating_power_request;
+  return request === undefined || request === null ? undefined : request > 0;
+}
 
 export const UPDATE_MAPPINGS = {
   [SUPPORTED_MODULE_TYPE.PLUG]: {
@@ -26,6 +63,14 @@ export const UPDATE_MAPPINGS = {
     temperature: (deviceNetatmo) => deviceNetatmo.measured?.temperature,
     therm_measured_temperature: (deviceNetatmo) => deviceNetatmo.room?.therm_measured_temperature,
     therm_setpoint_temperature: (deviceNetatmo) => deviceNetatmo.room?.therm_setpoint_temperature,
+    // Raw cell voltage in mV, alongside the coarse percentage above.
+    battery_level: (deviceNetatmo) => deviceNetatmo.battery_level,
+    therm_setpoint_mode: setpointMode,
+    operating_state: operatingState,
+    heating_power_request: heatingPowerRequest,
+    frost_guard: (deviceNetatmo) => isMode(deviceNetatmo, NETATMO_SETPOINT_MODE.FROST_GUARD),
+    away: (deviceNetatmo) => isMode(deviceNetatmo, NETATMO_SETPOINT_MODE.AWAY),
+    anticipating: (deviceNetatmo) => deviceNetatmo.room?.anticipating,
     open_window: (deviceNetatmo) => deviceNetatmo.room?.open_window,
     rf_strength: (deviceNetatmo) => deviceNetatmo.rf_strength,
     boiler_status: (deviceNetatmo) => deviceNetatmo.boiler_status,
@@ -34,14 +79,15 @@ export const UPDATE_MAPPINGS = {
     battery_percent: (deviceNetatmo) => deviceNetatmo.battery_state,
     therm_measured_temperature: (deviceNetatmo) => deviceNetatmo.room?.therm_measured_temperature,
     therm_setpoint_temperature: (deviceNetatmo) => deviceNetatmo.room?.therm_setpoint_temperature,
+    battery_level: (deviceNetatmo) => deviceNetatmo.battery_level,
+    therm_setpoint_mode: setpointMode,
+    operating_state: operatingState,
+    frost_guard: (deviceNetatmo) => isMode(deviceNetatmo, NETATMO_SETPOINT_MODE.FROST_GUARD),
+    away: (deviceNetatmo) => isMode(deviceNetatmo, NETATMO_SETPOINT_MODE.AWAY),
+    anticipating: (deviceNetatmo) => deviceNetatmo.room?.anticipating,
     open_window: (deviceNetatmo) => deviceNetatmo.room?.open_window,
     rf_strength: (deviceNetatmo) => deviceNetatmo.rf_strength,
-    heating_power_request: (deviceNetatmo) => {
-      const heatingPowerRequest = deviceNetatmo.room?.heating_power_request;
-      return heatingPowerRequest === undefined || heatingPowerRequest === null
-        ? undefined
-        : heatingPowerRequest > 0;
-    },
+    heating_power_request: heatingPowerRequest,
   },
   [SUPPORTED_MODULE_TYPE.NAMAIN]: {
     temperature: (deviceNetatmo) =>

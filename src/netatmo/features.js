@@ -13,6 +13,8 @@ import {
   DEVICE_FEATURE_UNITS,
 } from '@gladysassistant/integration-sdk';
 
+import { THERMOSTAT_MODE_OPTIONS } from './constants.js';
+
 function feature(overrides) {
   return {
     read_only: true,
@@ -90,6 +92,99 @@ export function buildFeatureThermSetpointTemperature(name, externalId, { writabl
     read_only: !writable,
     min: 5,
     max: 30,
+  });
+}
+
+// Thermostat mode (SDK 0.11.0+): the Gladys enum is a HVAC vocabulary, so only
+// off/heating(manual)/auto(schedule) are offered — `supported_options` narrows
+// the front's hardcoded list to what a Netatmo thermostat can do (no cooling).
+// Frost guard and away have no Gladys value and get their own features below;
+// see docs/PROPOSAL-thermostat-modes.md.
+export function buildFeatureThermostatMode(name, externalId, { writable = true } = {}) {
+  return feature({
+    name: `Mode - ${name}`,
+    external_id: `${externalId}:therm_setpoint_mode`,
+    selector: `${externalId}:therm_setpoint_mode`,
+    category: DEVICE_FEATURE_CATEGORIES.THERMOSTAT,
+    type: DEVICE_FEATURE_TYPES.THERMOSTAT.MODE,
+    read_only: !writable,
+    supported_options: THERMOSTAT_MODE_OPTIONS,
+    min: 0,
+    max: 3,
+  });
+}
+
+// Whether the room is actually calling for heat (SDK 0.11.0+): the standard
+// counterpart of the raw heating_power_request / boiler_status booleans.
+export function buildFeatureOperatingState(name, externalId) {
+  return feature({
+    name: `Operating state - ${name}`,
+    external_id: `${externalId}:operating_state`,
+    selector: `${externalId}:operating_state`,
+    category: DEVICE_FEATURE_CATEGORIES.THERMOSTAT,
+    type: DEVICE_FEATURE_TYPES.THERMOSTAT.OPERATING_STATE,
+    min: 0,
+    max: 2,
+  });
+}
+
+// Frost guard (Netatmo `hg`): keeps the room at a floor temperature (~7 °C).
+// A dedicated writable switch because THERMOSTAT_MODE has no member for it —
+// folding it onto OFF would tell the user the home is unprotected while it is
+// in fact still being protected.
+export function buildFeatureFrostGuard(name, externalId, { writable = true } = {}) {
+  return feature({
+    name: `Frost guard - ${name}`,
+    external_id: `${externalId}:frost_guard`,
+    selector: `${externalId}:frost_guard`,
+    category: DEVICE_FEATURE_CATEGORIES.SWITCH,
+    type: DEVICE_FEATURE_TYPES.SWITCH.BINARY,
+    read_only: !writable,
+    min: 0,
+    max: 1,
+  });
+}
+
+// Away mode (Netatmo `away`), same rationale as the frost guard above.
+export function buildFeatureAway(name, externalId, { writable = true } = {}) {
+  return feature({
+    name: `Away - ${name}`,
+    external_id: `${externalId}:away`,
+    selector: `${externalId}:away`,
+    category: DEVICE_FEATURE_CATEGORIES.SWITCH,
+    type: DEVICE_FEATURE_TYPES.SWITCH.BINARY,
+    read_only: !writable,
+    min: 0,
+    max: 1,
+  });
+}
+
+// The thermostat is pre-heating to reach the scheduled setpoint on time.
+export function buildFeatureAnticipating(name, externalId) {
+  return feature({
+    name: `Anticipating - ${name}`,
+    external_id: `${externalId}:anticipating`,
+    selector: `${externalId}:anticipating`,
+    category: DEVICE_FEATURE_CATEGORIES.SWITCH,
+    type: DEVICE_FEATURE_TYPES.SWITCH.BINARY,
+    min: 0,
+    max: 1,
+  });
+}
+
+// Raw battery voltage in millivolts (NATherm1 reports `battery_level`), next to
+// the coarse percentage derived from the `battery_state` string: 3767 mV tracks
+// wear far more finely than the five "high/medium/low" buckets.
+export function buildFeatureBatteryVoltage(name, externalId) {
+  return feature({
+    name: `Battery voltage - ${name}`,
+    external_id: `${externalId}:battery_level`,
+    selector: `${externalId}:battery_level`,
+    category: DEVICE_FEATURE_CATEGORIES.ENERGY_SENSOR,
+    type: DEVICE_FEATURE_TYPES.ENERGY_SENSOR.VOLTAGE,
+    unit: DEVICE_FEATURE_UNITS.MILLI_VOLT,
+    min: 0,
+    max: 10000,
   });
 }
 

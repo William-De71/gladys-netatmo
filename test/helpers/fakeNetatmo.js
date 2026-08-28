@@ -70,6 +70,8 @@ function buildDefaultHomeStatuses() {
             id: 'room-1',
             therm_measured_temperature: 19.5,
             therm_setpoint_temperature: 21,
+            therm_setpoint_mode: 'manual',
+            anticipating: false,
             open_window: false,
             heating_power_request: 0,
           },
@@ -77,6 +79,11 @@ function buildDefaultHomeStatuses() {
             id: 'room-2',
             therm_measured_temperature: 17,
             therm_setpoint_temperature: 19,
+            // Frost guard: NO Gladys THERMOSTAT_MODE counterpart — exercises
+            // the "keep the mode feature silent, raise the frost_guard switch"
+            // path (see docs/PROPOSAL-thermostat-modes.md).
+            therm_setpoint_mode: 'hg',
+            anticipating: true,
             open_window: true,
             heating_power_request: 42,
           },
@@ -87,6 +94,7 @@ function buildDefaultHomeStatuses() {
             id: 'therm-1',
             type: 'NATherm1',
             battery_percent: 76,
+            battery_level: 3767,
             rf_strength: 80,
             boiler_status: true,
           },
