@@ -8,7 +8,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createEvents, eventNameOf, eventDeviceIdOf } from '../../src/netatmo/events.js';
+import {
+  createEvents,
+  eventNameOf,
+  eventDeviceIdOf,
+  isEnergyRefreshEvent,
+} from '../../src/netatmo/events.js';
 
 // Injectable timers: capture the scheduled reset so the test drives it.
 function fakeTimers() {
@@ -153,4 +158,66 @@ test('a failing publish never throws out of the handler', async () => {
   const events = createEvents({ gladys, timers: fakeTimers() });
 
   await events.handleWebhook({ push_type: 'NACamera-movement', camera_id: 'camera-1' });
+});
+
+// Payload shapes below are the ones pyatmo 9.9.1 (the library Home Assistant
+// uses) asserts on in its own webhook tests — Energy events name themselves in
+// `event_type`, with an UNRELATED push_type alongside.
+test('an Energy event is named from event_type, not from its unrelated push_type', () => {
+  // "display_change" split on "-" would yield nothing useful; set_point must win.
+  assert.equal(eventNameOf({ event_type: 'set_point', push_type: 'display_change' }), 'set_point');
+  assert.equal(
+    eventNameOf({ event_type: 'therm_mode', push_type: 'home_event_changed' }),
+    'therm_mode',
+  );
+  // A security detection still reads its name from the push_type prefix.
+  assert.equal(eventNameOf({ push_type: 'NACamera-movement' }), 'movement');
+});
+
+test('isEnergyRefreshEvent recognises the setpoint/mode events and nothing else', () => {
+  assert.equal(
+    isEnergyRefreshEvent({ event_type: 'set_point', push_type: 'display_change' }),
+    true,
+  );
+  assert.equal(isEnergyRefreshEvent({ event_type: 'cancel_set_point' }), true);
+  assert.equal(isEnergyRefreshEvent({ event_type: 'therm_mode' }), true);
+  assert.equal(isEnergyRefreshEvent({ event_type: 'schedule' }), true);
+  // Security detections and lifecycle events are not Energy refreshes.
+  assert.equal(isEnergyRefreshEvent({ push_type: 'NACamera-movement' }), false);
+  assert.equal(isEnergyRefreshEvent({ push_type: 'NACamera-connection' }), false);
+  assert.equal(isEnergyRefreshEvent({}), false);
+  assert.equal(isEnergyRefreshEvent(null), false);
+});
+
+test('an Energy event publishes no momentary state (trigger, not data)', async () => {
+  const gladys = fakeGladys();
+  const events = createEvents({ gladys });
+  // A real set_point capture: it must NOT be published as a feature — the
+  // refresh it triggers is what surfaces the new setpoint.
+  const published = await events.handleWebhook({
+    event_type: 'set_point',
+    push_type: 'display_change',
+    home_id: 'home-1',
+    mode: 'manual',
+    temperature: 21,
+  });
+  assert.equal(published, undefined);
+  assert.deepEqual(gladys.published, []);
+  events.stop();
+});
+
+test('a therm_mode event carries no module id and is still recognised', async () => {
+  // therm_mode is a HOME-level event: no module_id/camera_id/device_id at all.
+  const payload = {
+    event_type: 'therm_mode',
+    push_type: 'home_event_changed',
+    home: { id: 'home-1', therm_mode: 'hg' },
+    mode: 'hg',
+  };
+  assert.equal(eventDeviceIdOf(payload), undefined);
+  assert.equal(isEnergyRefreshEvent(payload), true);
+  const gladys = fakeGladys();
+  const events = createEvents({ gladys });
+  assert.equal(await events.handleWebhook(payload), undefined);
+  events.stop();
 });

@@ -5,7 +5,7 @@
 // keep-alive, the transport badges, and the setpoint command.
 // -----------------------------------------------------------------------------
 
-import { test, beforeEach, afterEach } from 'node:test';
+import { test, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { normalizeConfig } from '../../src/config.js';
@@ -563,5 +563,126 @@ test('the refresh loop honours the configured interval', async () => {
     assert.deepEqual(timers, [60 * 1000]);
   } finally {
     globalThis.setInterval = originalSetInterval;
+  }
+});
+
+test('the post-command ladder stops as soon as Netatmo reports the commanded value', async () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    gladys.devices = await telemetry.syncDiscovery(config);
+    await telemetry.refreshValues(config);
+    const feature = 'ext:netatmo:therm-1:therm_setpoint_temperature';
+    const room1 = () =>
+      netatmo.state.homeStatuses['home-1'].home.rooms.find((r) => r.id === 'room-1');
+    const statusCalls = () =>
+      netatmo.state.apiRequests.filter((r) => r.path.includes('homestatus')).length;
+    // A ladder step awaits real network I/O against the fake cloud, and only
+    // arms the NEXT step once it has finished — so each tick must be followed
+    // by a wait for that step to complete, never by another tick straight away.
+    const stepDone = async (before) => {
+      for (let i = 0; i < 500 && statusCalls() === before; i += 1) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      // Let the step finish publishing and arm the next timer.
+      for (let i = 0; i < 50; i += 1) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+    };
+    const tick = (ms) => {
+      clock += ms;
+      mock.timers.tick(ms);
+    };
+
+    // The user asks for 22; Netatmo still reports the old 21 (the relay has not
+    // pushed it to the thermostat yet), so the ladder must keep climbing.
+    telemetry.scheduleRefreshAfterCommand(config, { featureExternalId: feature, state: 22 });
+    let before = statusCalls();
+    tick(3000);
+    await stepDone(before);
+    assert.ok(statusCalls() > before, 'the first ladder step must re-read');
+    assert.equal(stateOf(feature).at(-1), 21, 'Netatmo has not applied the command yet');
+
+    // The relay pushed it: the second step (10s) now sees 22.
+    room1().therm_setpoint_temperature = 22;
+    before = statusCalls();
+    tick(10000);
+    await stepDone(before);
+    assert.equal(stateOf(feature).at(-1), 22, 'the second step must publish the new setpoint');
+    const afterSettle = statusCalls();
+
+    // Settled: the third step (30s) must never fire.
+    tick(30000);
+    for (let i = 0; i < 100; i += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    assert.equal(statusCalls(), afterSettle, 'the ladder must stop once the value is settled');
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('the post-command ladder gives up after its last step', async () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    gladys.devices = await telemetry.syncDiscovery(config);
+    const feature = 'ext:netatmo:therm-1:therm_setpoint_temperature';
+    const statusCalls = () =>
+      netatmo.state.apiRequests.filter((r) => r.path.includes('homestatus')).length;
+    const stepDone = async (before) => {
+      for (let i = 0; i < 500 && statusCalls() === before; i += 1) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      for (let i = 0; i < 50; i += 1) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+    };
+    const tick = (ms) => {
+      clock += ms;
+      mock.timers.tick(ms);
+    };
+
+    // Netatmo never reports 30, so every step of the ladder must run...
+    telemetry.scheduleRefreshAfterCommand(config, { featureExternalId: feature, state: 30 });
+    for (const delay of [3000, 10000, 30000]) {
+      const before = statusCalls();
+      tick(delay);
+      await stepDone(before);
+      assert.ok(statusCalls() > before, `the ${delay}ms step must re-read`);
+    }
+
+    // ...and then the ladder must give up rather than re-read forever.
+    const exhausted = statusCalls();
+    tick(60000);
+    for (let i = 0; i < 100; i += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    assert.equal(statusCalls(), exhausted, 'no re-read past the last ladder step');
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('refreshValuesFresh bypasses the load cache so a webhook sees the change', async () => {
+  // A webhook-triggered refresh landing within the load TTL must NOT be served
+  // the payload from before the event — that is the latency it exists to kill.
+  const cached = createTelemetry({ gladys, client, now: () => clock, loadTtlMs: 60_000 });
+  try {
+    gladys.devices = await cached.syncDiscovery(config);
+    await cached.refreshValues(config);
+    const feature = 'ext:netatmo:therm-1:therm_setpoint_temperature';
+    assert.equal(stateOf(feature).at(-1), 21);
+
+    const room1 = netatmo.state.homeStatuses['home-1'].home.rooms.find((r) => r.id === 'room-1');
+    room1.therm_setpoint_temperature = 23;
+
+    // Within the TTL: the cached load still reports the old setpoint.
+    await cached.refreshValues(config);
+    assert.equal(stateOf(feature).at(-1), 21, 'the cached refresh must not see the change');
+
+    // The fresh variant drops the cache and publishes the new value.
+    await cached.refreshValuesFresh(config);
+    assert.equal(stateOf(feature).at(-1), 23);
+  } finally {
+    cached.stop();
   }
 });

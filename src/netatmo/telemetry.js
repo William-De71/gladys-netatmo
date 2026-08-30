@@ -28,7 +28,7 @@ import { createLogger, DEVICE_TRANSPORTS } from '@gladysassistant/integration-sd
 import {
   REFRESH_VALUES_INTERVAL_MS,
   STATE_KEEP_ALIVE_MS,
-  POST_COMMAND_REFRESH_DELAY_MS,
+  POST_COMMAND_REFRESH_DELAYS_MS,
   MAX_ENTRIES_PER_REQUEST,
   SECURITY_MODULE_TYPES,
   CAMERA_LIVE_QUALITIES,
@@ -90,7 +90,9 @@ export function createTelemetry({
   const published = new Map();
   let refreshTimer = null;
   let refreshInFlight = null;
-  let postCommandTimer = null;
+  // Pending post-command re-reads (the ladder walks one step at a time, but a
+  // superseded ladder must be cancellable as a whole).
+  const postCommandTimers = new Set();
 
   const cameras = createCameraImages({ fetchImpl, now });
   // Last raw Netatmo payload per camera id (vpn_url, is_local...), refreshed
@@ -423,6 +425,20 @@ export function createTelemetry({
   // --- Refresh loop ----------------------------------------------------------
 
   /**
+   * Refresh triggered by a webhook event: the point is to see what JUST
+   * changed, so the short-TTL load cache is dropped first. Without this, an
+   * event landing within the TTL of the previous cycle would be answered from
+   * a payload that predates the change — the very latency the webhook exists
+   * to remove.
+   * @param {object} config normalized integration config
+   * @returns {Promise<number>} number of states published
+   */
+  function refreshValuesFresh(config) {
+    loadCache = null;
+    return refreshValues(config);
+  }
+
+  /**
    * One refresh cycle (single-flight, like the core refreshNetatmoValues):
    * load every raw device and publish the states of the devices the user
    * created in Gladys.
@@ -501,24 +517,73 @@ export function createTelemetry({
   }
 
   /**
-   * Re-read the account shortly after a user command, so the UI reflects what
-   * Netatmo actually applied instead of waiting for the next full cycle. The
-   * short-TTL load cache is dropped first: the point is to see the NEW state.
+   * Re-read the account after a user command, so the UI reflects what Netatmo
+   * actually applied instead of waiting for the next full cycle. The short-TTL
+   * load cache is dropped before each read: the point is to see the NEW state.
+   *
+   * A single re-read is not enough. The Netatmo cloud acks the command at once,
+   * but the relay only pushes it to the thermostat on its own radio schedule,
+   * so an early homestatus read still returns the OLD value — republished, and
+   * then frozen by the dedup until the next cycle. That is the "my command
+   * bounced back" symptom. So we walk POST_COMMAND_REFRESH_DELAYS_MS, and stop
+   * as soon as the expectation below is met.
+   *
    * Fire-and-forget — a failure here must never surface as a command error.
    * @param {object} config normalized integration config
+   * @param {{featureExternalId: string, state: number}} [expected] the value the
+   *   command asked for; the ladder stops early once it is the published one.
+   *   Omitted (camera monitoring, unknown target) → the full ladder runs.
    */
-  function scheduleRefreshAfterCommand(config) {
-    if (postCommandTimer) {
-      clearTimeout(postCommandTimer);
+  /**
+   * Re-read after an Energy webhook event (setpoint/mode changed from the
+   * Netatmo app or a schedule). Same ladder as a local command: the event fires
+   * when the CLOUD accepts the change, but homestatus only reports it once the
+   * relay has pushed it, so a single early read can still return the old value.
+   * No expectation here — we do not know the new value, only that it moved —
+   * so the full ladder runs, each step re-reading fresh.
+   * @param {object} config normalized integration config
+   */
+  function scheduleRefreshAfterEvent(config) {
+    scheduleRefreshAfterCommand(config);
+  }
+
+  function scheduleRefreshAfterCommand(config, expected) {
+    clearPostCommandTimers();
+    // A new command supersedes the previous ladder: its expectation is stale.
+    const settled = () =>
+      Boolean(expected) && published.get(expected.featureExternalId)?.state === expected.state;
+    const step = (index) => {
+      if (index >= POST_COMMAND_REFRESH_DELAYS_MS.length) {
+        return;
+      }
+      const timer = setTimeout(async () => {
+        postCommandTimers.delete(timer);
+        loadCache = null;
+        try {
+          await refreshValues(config);
+        } catch (err) {
+          logger.warn(`Post-command refresh failed: ${err.message}`);
+        }
+        if (settled()) {
+          logger.debug(
+            `Post-command refresh: ${expected.featureExternalId} settled on ${expected.state}`,
+          );
+          return;
+        }
+        step(index + 1);
+      }, POST_COMMAND_REFRESH_DELAYS_MS[index]);
+      timer.unref?.();
+      postCommandTimers.add(timer);
+    };
+    step(0);
+  }
+
+  /** Cancel every pending post-command re-read. */
+  function clearPostCommandTimers() {
+    for (const timer of postCommandTimers) {
+      clearTimeout(timer);
     }
-    postCommandTimer = setTimeout(() => {
-      postCommandTimer = null;
-      loadCache = null;
-      refreshValues(config).catch((err) =>
-        logger.warn(`Post-command refresh failed: ${err.message}`),
-      );
-    }, POST_COMMAND_REFRESH_DELAY_MS);
-    postCommandTimer.unref?.();
+    postCommandTimers.clear();
   }
 
   /** Stop the periodic refresh loop and any pending post-command refresh. */
@@ -527,16 +592,15 @@ export function createTelemetry({
       clearInterval(refreshTimer);
       refreshTimer = null;
     }
-    if (postCommandTimer) {
-      clearTimeout(postCommandTimer);
-      postCommandTimer = null;
-    }
+    clearPostCommandTimers();
   }
 
   return {
     syncDiscovery,
     refreshValues,
+    refreshValuesFresh,
     scheduleRefreshAfterCommand,
+    scheduleRefreshAfterEvent,
     getCameraSnapshot,
     resetDedup,
     start,

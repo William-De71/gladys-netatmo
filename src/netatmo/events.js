@@ -18,7 +18,7 @@
 
 import { createLogger } from '@gladysassistant/integration-sdk';
 
-import { EVENT_FEATURE_SUFFIXES, EVENT_RESET_MS } from './constants.js';
+import { EVENT_FEATURE_SUFFIXES, EVENT_RESET_MS, ENERGY_REFRESH_EVENTS } from './constants.js';
 
 const logger = createLogger({ name: 'netatmo-events' });
 
@@ -31,9 +31,29 @@ const logger = createLogger({ name: 'netatmo-events' });
  */
 export function eventNameOf(payload) {
   const pushType = typeof payload?.push_type === 'string' ? payload.push_type : '';
+  const eventType = typeof payload?.event_type === 'string' ? payload.event_type : '';
+  // Energy events carry the real name in `event_type`, alongside an UNRELATED
+  // push_type ("set_point" + "display_change", "therm_mode" +
+  // "home_event_changed"). Splitting that push_type on "-" would yield a
+  // meaningless "change", so an explicit energy event_type always wins.
+  if (ENERGY_REFRESH_EVENTS.includes(eventType.toLowerCase())) {
+    return eventType.toLowerCase();
+  }
   const fromPushType = pushType.includes('-') ? pushType.slice(pushType.indexOf('-') + 1) : '';
-  const name = fromPushType || payload?.event_type;
+  const name = fromPushType || eventType;
   return typeof name === 'string' && name.length > 0 ? name.toLowerCase() : undefined;
+}
+
+/**
+ * True when the event means "a pollable Energy state just changed" (setpoint,
+ * mode, schedule). Those carry no momentary feature: they only trigger a
+ * refresh, which is what cuts the Netatmo-app -> Gladys latency.
+ * @param {object} payload parsed webhook body
+ * @returns {boolean} whether this event should trigger a refresh
+ */
+export function isEnergyRefreshEvent(payload) {
+  const name = eventNameOf(payload);
+  return Boolean(name) && ENERGY_REFRESH_EVENTS.includes(name);
 }
 
 /**
@@ -107,7 +127,10 @@ export function createEvents({
     if (!suffix) {
       // Connection/disconnection, on/off, daily summary…: nothing momentary to
       // publish (the refresh triggered alongside covers the pollable state).
-      logger.debug(`Webhook event "${eventName ?? 'unknown'}" carries no momentary state`);
+      logger.debug(
+        `Webhook event "${eventName ?? 'unknown'}" carries no momentary state` +
+          (isEnergyRefreshEvent(payload) ? ' — it triggers a refresh instead' : ''),
+      );
       return undefined;
     }
     const deviceId = eventDeviceIdOf(payload);

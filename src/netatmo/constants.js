@@ -52,6 +52,25 @@ export const EVENT_FEATURE_SUFFIXES = {
   smoke: 'smoke',
 };
 
+// Energy (thermostat) webhook events. Unlike the security detections above,
+// these carry NO momentary feature of their own: they mean "the setpoint/mode
+// just changed", i.e. exactly the pollable state homestatus serves. Per the
+// "trigger, not data" doctrine they only TRIGGER a refresh — which is what
+// makes a change made from the Netatmo app show up in Gladys within seconds
+// instead of at the next poll cycle.
+//
+// Verified against pyatmo 9.9.1 (`src/pyatmo/webhook.py`, the library Home
+// Assistant uses): these arrive as `event_type`, with an UNRELATED `push_type`
+// ("display_change" for set_point, "home_event_changed" for therm_mode) — so
+// they must be matched on event_type, never on the push_type prefix.
+export const ENERGY_REFRESH_EVENTS = [
+  'set_point',
+  'cancel_set_point',
+  'setpoint_event',
+  'therm_mode',
+  'schedule',
+];
+
 // A momentary event has no "cleared" counterpart in the Netatmo stream: the
 // feature is set to 1 then automatically back to 0 after this delay, like any
 // motion sensor (a stuck 1 would make a scene trigger fire once and never again).
@@ -245,7 +264,16 @@ export const STATE_KEEP_ALIVE_MS = 5 * 60 * 1000;
 // After a user command (setpoint, mode, frost guard...), Netatmo needs a moment
 // before homestatus reflects it: re-read shortly after instead of waiting for
 // the next full cycle, so the UI does not snap back to the previous value.
-export const POST_COMMAND_REFRESH_DELAY_MS = 3 * 1000;
+//
+// One re-read is not enough. The command lands on the Netatmo cloud instantly,
+// but the relay only reaches the thermostat on its own radio schedule, so a
+// homestatus read at 3s routinely still returns the OLD setpoint — which then
+// gets published and sticks until the next full cycle, exactly the "my command
+// bounced back" symptom. Hence a short ladder of re-reads instead: each step
+// re-reads, and the ladder stops early as soon as the expected value is the one
+// published (see `scheduleRefreshAfterCommand`). Worst case it costs 3 extra
+// loads spread over 30s, and only after an actual user command.
+export const POST_COMMAND_REFRESH_DELAYS_MS = [3 * 1000, 10 * 1000, 30 * 1000];
 
 // How many homes are detailed concurrently (mirrors the core Promise.map).
 export const HOMES_CONCURRENCY = 2;

@@ -28,9 +28,18 @@ import { createNetatmoOAuth, NotConnectedError } from './src/netatmo/oauth.js';
 import { createNetatmoClient } from './src/netatmo/client.js';
 import { createTelemetry } from './src/netatmo/telemetry.js';
 import { createWebhooks } from './src/netatmo/webhooks.js';
-import { createEvents } from './src/netatmo/events.js';
+import { createEvents, isEnergyRefreshEvent } from './src/netatmo/events.js';
 import { setDeviceValue } from './src/netatmo/setValue.js';
 import { CONNECTION_MESSAGES, WEBHOOK_KEY } from './src/netatmo/constants.js';
+
+/** Parse a JSON webhook body, tolerating anything that is not JSON. */
+function safeJsonParse(body) {
+  try {
+    return JSON.parse(body);
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Report the application-level connection status of the integration.
@@ -84,7 +93,9 @@ export function setupIntegration(
   const webhooks = createWebhooks({
     gladys,
     client,
-    refresh: () => telemetry.refreshValues(config),
+    // A webhook exists to show what JUST changed: always re-read fresh rather
+    // than risk being served the cached payload from before the event.
+    refresh: () => telemetry.refreshValuesFresh(config),
   });
   // Momentary detections (motion, person, smoke…): published as push features
   // straight from the event payload — no API state ever reports them.
@@ -208,10 +219,14 @@ export function setupIntegration(
   gladys.onSetValue(async (device, feature, value) => {
     logger.info(`onSetValue <- ${feature.external_id} = ${value}`);
     await setDeviceValue({ gladys, client }, { device, feature, value });
-    // Netatmo needs a moment before homestatus reports the new setpoint/mode:
-    // re-read shortly after so the UI does not snap back to the old value
-    // until the next cycle.
-    telemetry.scheduleRefreshAfterCommand(config);
+    // Netatmo needs a moment before homestatus reports the new setpoint/mode —
+    // sometimes more than one relay cycle. Re-read on a short ladder, telling
+    // it which value to expect so it can stop as soon as Netatmo agrees,
+    // instead of letting the UI snap back to the old value until next cycle.
+    telemetry.scheduleRefreshAfterCommand(config, {
+      featureExternalId: feature.external_id,
+      state: value,
+    });
   });
 
   // --- Camera: Gladys asks for a fresh snapshot ------------------------------
@@ -226,7 +241,19 @@ export function setupIntegration(
   // else), and every event debounces a refresh of the pollable state.
   gladys.onWebhook(WEBHOOK_KEY, async (request) => {
     logger.debug('Netatmo webhook event received');
-    await events.handleWebhook(request?.body);
+    const body = request?.body;
+    await events.handleWebhook(body);
+    // An Energy event (setpoint/mode changed from the Netatmo app, or by a
+    // schedule) fires when the CLOUD accepts the change, but homestatus only
+    // reports it once the relay reached the thermostat. A single debounced
+    // read would often still see the OLD value and freeze it until the next
+    // cycle, so these ride the same re-read ladder as a local command.
+    const payload = typeof body === 'string' ? safeJsonParse(body) : body;
+    if (isEnergyRefreshEvent(payload)) {
+      logger.info('Netatmo Energy event — re-reading the thermostat state');
+      telemetry.scheduleRefreshAfterEvent(config);
+      return;
+    }
     webhooks.handleEvent();
   });
   // The Gladys Plus availability changed (Plus linked/unlinked, key changed):
