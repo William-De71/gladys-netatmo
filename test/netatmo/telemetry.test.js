@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { normalizeConfig } from '../../src/config.js';
 import { createNetatmoClient } from '../../src/netatmo/client.js';
 import { createTelemetry } from '../../src/netatmo/telemetry.js';
+import { REFRESH_VALUES_INTERVAL_MS } from '../../src/netatmo/constants.js';
 import { setDeviceValue } from '../../src/netatmo/setValue.js';
 import { startFakeNetatmo } from '../helpers/fakeNetatmo.js';
 
@@ -549,7 +550,7 @@ test('the frost-guard and away switches map onto the room setpoint mode', async 
 
 // --- Refresh cadence --------------------------------------------------------
 
-test('the refresh loop honours the configured interval', async () => {
+test('the refresh loop runs at the fixed cadence, whatever the config carries', async () => {
   const timers = [];
   const originalSetInterval = globalThis.setInterval;
   globalThis.setInterval = (fn, ms) => {
@@ -558,9 +559,12 @@ test('the refresh loop honours the configured interval', async () => {
   };
   try {
     const engine = createTelemetry({ gladys, client });
-    engine.start(normalizeConfig({ refresh_interval: 60 }));
+    // A stale refresh_interval left over in a saved config must be ignored:
+    // the cadence is no longer user-selectable (setpoint/mode changes arrive
+    // through the Energy webhook instead).
+    engine.start(normalizeConfig({ refresh_interval: 30 }));
     engine.stop();
-    assert.deepEqual(timers, [60 * 1000]);
+    assert.deepEqual(timers, [REFRESH_VALUES_INTERVAL_MS]);
   } finally {
     globalThis.setInterval = originalSetInterval;
   }

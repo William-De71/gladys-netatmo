@@ -493,19 +493,15 @@ export function createTelemetry({
   /**
    * Start the periodic refresh loop (immediate first cycle).
    *
-   * The cadence comes from the user configuration (`refresh_interval`, in
-   * seconds, already bounded by normalizeConfig); the constructor override
-   * still wins so tests can drive their own clock.
+   * The cadence is fixed (REFRESH_VALUES_INTERVAL_MS): setpoint and mode
+   * changes now arrive through the Energy webhook, so this loop only carries
+   * the background telemetry — temperature, battery, RF — which Netatmo itself
+   * only refreshes every few minutes. The constructor override still wins so
+   * tests can drive their own clock.
    */
   function start(config) {
     stop();
-    const configuredMs = Number(config?.refresh_interval) * 1000;
-    const intervalMs =
-      refreshIntervalMs !== REFRESH_VALUES_INTERVAL_MS
-        ? refreshIntervalMs
-        : Number.isFinite(configuredMs) && configuredMs > 0
-          ? configuredMs
-          : refreshIntervalMs;
+    const intervalMs = refreshIntervalMs;
     const run = () =>
       refreshValues(config).catch((err) =>
         logger.error(`Netatmo value refresh failed: ${err.message}`),

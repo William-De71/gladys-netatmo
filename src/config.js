@@ -19,8 +19,6 @@
 // rest of the code never has to deal with `undefined`.
 // -----------------------------------------------------------------------------
 
-import { MIN_REFRESH_INTERVAL_MS, MAX_REFRESH_INTERVAL_MS } from './netatmo/constants.js';
-
 // Defaults: they MUST stay consistent with the `default` values declared in the
 // `config_schema` of the manifest.
 export const DEFAULT_CONFIG = {
@@ -30,7 +28,6 @@ export const DEFAULT_CONFIG = {
   weather_api: true, // discover Weather devices (stations and modules)
   security_api: false, // discover Security devices (cameras), opt-in like the core
   camera_quality: 'high', // live stream quality (per-camera device param overrides)
-  refresh_interval: 120, // seconds between two value refresh cycles
 
   // Internal keys (NOT in the config_schema), persisted through setConfig():
   access_token: '', // OAuth2 access token
@@ -57,27 +54,6 @@ function toBoolean(value, fallback) {
 }
 
 /**
- * Coerce the refresh interval (seconds) coming from the config select.
- *
- * Bounded on both ends: a too-short interval would burn the Netatmo quota
- * (500 requests / 10 min per user), a too-long one would make the integration
- * look dead. An unparseable value falls back to the default rather than
- * silently disabling the loop.
- * @param {unknown} value raw value, in seconds
- * @returns {number} interval in seconds
- */
-function toRefreshInterval(value) {
-  const seconds = Number(value);
-  if (!Number.isFinite(seconds) || seconds <= 0) {
-    return DEFAULT_CONFIG.refresh_interval;
-  }
-  return Math.min(
-    Math.max(seconds, MIN_REFRESH_INTERVAL_MS / 1000),
-    MAX_REFRESH_INTERVAL_MS / 1000,
-  );
-}
-
-/**
  * Merge the user config with the defaults.
  * @param {Record<string, unknown>} raw config returned by the SDK
  */
@@ -92,7 +68,6 @@ export function normalizeConfig(raw = {}) {
     weather_api: toBoolean(raw.weather_api, DEFAULT_CONFIG.weather_api),
     security_api: toBoolean(raw.security_api, DEFAULT_CONFIG.security_api),
     camera_quality: String(raw.camera_quality ?? DEFAULT_CONFIG.camera_quality).trim(),
-    refresh_interval: toRefreshInterval(raw.refresh_interval),
     access_token: String(raw.access_token ?? DEFAULT_CONFIG.access_token).trim(),
     refresh_token: String(raw.refresh_token ?? DEFAULT_CONFIG.refresh_token).trim(),
     expires_at: Number(raw.expires_at ?? DEFAULT_CONFIG.expires_at) || 0,

@@ -280,12 +280,6 @@ export function setupIntegration(
       telemetry.resetDedup();
     }
     await syncConnection();
-    // A new cadence only takes effect on a restarted loop (setInterval keeps
-    // its original period otherwise).
-    if (previous.refresh_interval !== config.refresh_interval && oauth.hasTokens()) {
-      logger.info(`Refresh interval changed to ${config.refresh_interval}s -> restarting the loop`);
-      telemetry.start(config);
-    }
     // Saving the configuration re-runs the discovery automatically: enabling
     // a toggle (e.g. security_api) must surface its devices without a manual
     // re-scan on the Discovery screen.

@@ -185,69 +185,6 @@
           }
         }
       ]
-    },
-    {
-      "key": "section_refresh",
-      "type": "section",
-      "label": {
-        "en": "Refresh",
-        "fr": "Rafraîchissement"
-      },
-      "description": {
-        "en": "How often Gladys re-reads the values of your Netatmo devices. One cycle costs 3-4 API calls for the whole account, well within the Netatmo limit of 500 requests per 10 minutes. Netatmo itself only refreshes its cloud data every few minutes, so a very short interval does not necessarily mean fresher values.",
-        "fr": "Fréquence à laquelle Gladys relit les valeurs de vos appareils Netatmo. Un cycle coûte 3 à 4 appels API pour tout le compte, largement en dessous de la limite Netatmo de 500 requêtes par 10 minutes. Netatmo ne rafraîchit lui-même ses données dans le cloud que toutes les quelques minutes : un intervalle très court ne garantit donc pas des valeurs plus fraîches."
-      }
-    },
-    {
-      "key": "refresh_interval",
-      "type": "select",
-      "label": {
-        "en": "Refresh interval",
-        "fr": "Intervalle de rafraîchissement"
-      },
-      "description": {
-        "en": "Delay between two value refresh cycles.",
-        "fr": "Délai entre deux cycles de rafraîchissement des valeurs."
-      },
-      "required": false,
-      "default": "120",
-      "options": [
-        {
-          "value": "30",
-          "label": {
-            "en": "30 seconds",
-            "fr": "30 secondes"
-          }
-        },
-        {
-          "value": "60",
-          "label": {
-            "en": "1 minute",
-            "fr": "1 minute"
-          }
-        },
-        {
-          "value": "120",
-          "label": {
-            "en": "2 minutes (recommended)",
-            "fr": "2 minutes (recommandé)"
-          }
-        },
-        {
-          "value": "300",
-          "label": {
-            "en": "5 minutes",
-            "fr": "5 minutes"
-          }
-        },
-        {
-          "value": "600",
-          "label": {
-            "en": "10 minutes",
-            "fr": "10 minutes"
-          }
-        }
-      ]
     }
   ]
 }

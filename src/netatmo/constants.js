@@ -242,18 +242,6 @@ export const THERMOSTAT_MODE_OPTIONS = [
 // one call per device, which matters against the Netatmo rate limits.
 export const REFRESH_VALUES_INTERVAL_MS = 120 * 1000;
 
-// User-selectable cadences (seconds), exposed by the manifest `refresh_interval`
-// select. Netatmo rate-limits an app to 500 requests / 10 min per user; one
-// cycle costs 3-4 calls, so even the fastest option stays far below the cap
-// (60s -> ~24 calls / 10 min).
-export const REFRESH_INTERVAL_CHOICES = [30, 60, 120, 300, 600];
-
-// Bounds applied to any refresh interval, whatever its origin: a value below
-// the floor would hammer the Netatmo quota, one above the ceiling would make
-// the integration look dead.
-export const MIN_REFRESH_INTERVAL_MS = 30 * 1000;
-export const MAX_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
-
 // A state whose value did not change is re-published at most every 5 minutes
 // (keep-alive), so Gladys keeps seeing the device alive. Deliberately shorter
 // than the 30 minutes the core uses: on a thermostat, the values that matter
